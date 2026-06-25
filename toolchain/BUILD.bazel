@@ -98,8 +98,8 @@ cc_toolchain_config(
 cc_toolchain_config(
     name = "osx-aarch_64-config",
     extra_compiler_flags = [
-        "-I/usr/tools/xcode_14_0/macosx/usr/include/c++/v1",
-        "-I/usr/tools/xcode_14_0/macosx/usr/include",
+        "-isystem/usr/tools/xcode_14_0/macosx/usr/include/c++/v1",
+        "-isystem/usr/tools/xcode_14_0/macosx/usr/include",
         "-F/usr/tools/xcode_14_0/macosx/System/Library/Frameworks",
         "-Wno-error=nullability-completeness",
         "-Wno-error=availability",
@@ -115,8 +115,8 @@ cc_toolchain_config(
 cc_toolchain_config(
     name = "osx-x86_64-config",
     extra_compiler_flags = [
-        "-I/usr/tools/xcode_14_0/macosx/usr/include/c++/v1",
-        "-I/usr/tools/xcode_14_0/macosx/usr/include",
+        "-isystem/usr/tools/xcode_14_0/macosx/usr/include/c++/v1",
+        "-isystem/usr/tools/xcode_14_0/macosx/usr/include",
         "-F/usr/tools/xcode_14_0/macosx/System/Library/Frameworks",
         "-Wno-error=nullability-completeness",
         "-Wno-error=availability",
