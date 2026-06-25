@@ -5,11 +5,17 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
+#include <cstddef>
+#include <iterator>
 #include <string>
 
+#include <benchmark/benchmark.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include "absl/log/absl_check.h"
 #include "absl/status/status.h"
+#include "absl/strings/string_view.h"
+#include "google/protobuf/arena.h"
 #include "google/protobuf/json/json.h"
 #include "google/protobuf/json/json_enumval_custom_string.pb.h"
 
@@ -234,6 +240,158 @@ TEST(JsonEnumvalCustomStringTest, GreatHelmIntOverride) {
   EXPECT_OK(status);
   EXPECT_EQ(json_res, R"json({"armor":1})json");
 }
+
+constexpr absl::string_view kDefaultPayloads[] = {
+    R"json({"armor":"ARMOR_GREAT_HELM"})json",
+    R"json({"armor":"ARMOR_GAUNTLET"})json",
+    R"json({"armor":"ARMOR_PLATE"})json",
+    R"json({"armor":"ARMOR_COIF"})json",
+    R"json({"armor":"ARMOR_PAULDRON"})json",
+    R"json({"armor":"ARMOR_SABATON"})json",
+    R"json({"armor":"ARMOR_HACHI_MAI_DO"})json",
+};
+
+constexpr absl::string_view kDefaultCaselessPayloads[] = {
+    R"json({"armor":"armor_great_helm"})json",
+    R"json({"armor":"Armor_Gauntlet"})json",
+    R"json({"armor":"ARMOR_plate"})json",
+    R"json({"armor":"armor_Coif"})json",
+    R"json({"armor":"ArmOr_PaulDrOn"})json",
+    R"json({"armor":"armor_sabaton"})json",
+    R"json({"armor":"ARMOR_hachi_mai_do"})json",
+};
+
+constexpr absl::string_view kCustomPayloads[] = {
+    R"json({"armor":"gr8 helm"})json",
+    R"json({"armor":"a\"b"})json",
+    R"json({"armor":"\"plate\""})json",
+    R"json({"armor":""})json",
+    R"json({"armor":"p\taul\ndron"})json",
+    R"json({"armor":"sabaton"})json",
+    R"json({"armor":"8"})json",
+};
+
+constexpr absl::string_view kCustomCaselessPayloads[] = {
+    R"json({"armor":"GR8 HELM"})json",
+    R"json({"armor":"A\"B"})json",
+    R"json({"armor":"\"PlAtE\""})json",
+    R"json({"armor":""})json",
+    R"json({"armor":"P\tAuL\nDrOn"})json",
+    R"json({"armor":"SABATON"})json",
+    R"json({"armor":"8"})json",
+};
+
+constexpr absl::string_view kUnknownPayloads[] = {
+    R"json({"armor":"UNKNOWN_1"})json", R"json({"armor":"UNKNOWN_2"})json",
+    R"json({"armor":"UNKNOWN_3"})json", R"json({"armor":"UNKNOWN_4"})json",
+    R"json({"armor":"UNKNOWN_5"})json", R"json({"armor":"UNKNOWN_6"})json",
+    R"json({"armor":"UNKNOWN_7"})json",
+};
+
+static_assert(
+    std::size(kDefaultPayloads) == std::size(kDefaultCaselessPayloads),
+    "benchmark payloads must have the same size to let the benchmark results "
+    "be meaningfully comparable");
+static_assert(
+    std::size(kDefaultPayloads) == std::size(kCustomPayloads),
+    "benchmark payloads must have the same size to let the benchmark results "
+    "be meaningfully comparable");
+static_assert(
+    std::size(kDefaultPayloads) == std::size(kCustomCaselessPayloads),
+    "benchmark payloads must have the same size to let the benchmark results "
+    "be meaningfully comparable");
+static_assert(
+    std::size(kDefaultPayloads) == std::size(kUnknownPayloads),
+    "benchmark payloads must have the same size to let the benchmark results "
+    "be meaningfully comparable");
+
+void BM_ParseJsonDefault(benchmark::State& state) {
+  constexpr int kNumParses = 100;
+  constexpr size_t batch_size = std::size(kDefaultPayloads) * kNumParses;
+  while (state.KeepRunningBatch(batch_size)) {
+    for (absl::string_view payload : kDefaultPayloads) {
+      for (int i = 0; i < kNumParses; ++i) {
+        google::protobuf::Arena arena;
+        Knight* msg = google::protobuf::Arena::Create<Knight>(&arena);
+        absl::Status parse_status = json::JsonStringToMessage(payload, msg);
+        ABSL_CHECK(parse_status.ok());
+      }
+    }
+  }
+}
+BENCHMARK(BM_ParseJsonDefault);
+
+void BM_ParseJsonDefaultCaseless(benchmark::State& state) {
+  constexpr int kNumParses = 100;
+  json::ParseOptions options;
+  options.case_insensitive_enum_parsing = true;
+  constexpr size_t batch_size =
+      std::size(kDefaultCaselessPayloads) * kNumParses;
+  while (state.KeepRunningBatch(batch_size)) {
+    for (absl::string_view payload : kDefaultCaselessPayloads) {
+      for (int i = 0; i < kNumParses; ++i) {
+        google::protobuf::Arena arena;
+        Knight* msg = google::protobuf::Arena::Create<Knight>(&arena);
+        absl::Status parse_status =
+            json::JsonStringToMessage(payload, msg, options);
+        ABSL_CHECK(parse_status.ok());
+      }
+    }
+  }
+}
+BENCHMARK(BM_ParseJsonDefaultCaseless);
+
+void BM_ParseJsonCustom(benchmark::State& state) {
+  constexpr int kNumParses = 100;
+  constexpr size_t batch_size = std::size(kCustomPayloads) * kNumParses;
+  while (state.KeepRunningBatch(batch_size)) {
+    for (absl::string_view payload : kCustomPayloads) {
+      for (int i = 0; i < kNumParses; ++i) {
+        google::protobuf::Arena arena;
+        Knight* msg = google::protobuf::Arena::Create<Knight>(&arena);
+        absl::Status parse_status = json::JsonStringToMessage(payload, msg);
+        ABSL_CHECK(parse_status.ok());
+      }
+    }
+  }
+}
+BENCHMARK(BM_ParseJsonCustom);
+
+void BM_ParseJsonCustomCaseless(benchmark::State& state) {
+  constexpr int kNumParses = 100;
+  json::ParseOptions options;
+  options.case_insensitive_enum_parsing = true;
+  constexpr size_t batch_size = std::size(kCustomCaselessPayloads) * kNumParses;
+  while (state.KeepRunningBatch(batch_size)) {
+    for (absl::string_view payload : kCustomCaselessPayloads) {
+      for (int i = 0; i < kNumParses; ++i) {
+        google::protobuf::Arena arena;
+        Knight* msg = google::protobuf::Arena::Create<Knight>(&arena);
+        absl::Status parse_status =
+            json::JsonStringToMessage(payload, msg, options);
+        ABSL_CHECK(parse_status.ok());
+      }
+    }
+  }
+}
+BENCHMARK(BM_ParseJsonCustomCaseless);
+
+void BM_ParseJsonUnknown(benchmark::State& state) {
+  constexpr int kNumParses = 100;
+  constexpr size_t batch_size = std::size(kUnknownPayloads) * kNumParses;
+  while (state.KeepRunningBatch(batch_size)) {
+    for (absl::string_view payload : kUnknownPayloads) {
+      for (int i = 0; i < kNumParses; ++i) {
+        google::protobuf::Arena arena;
+        Knight* msg = google::protobuf::Arena::Create<Knight>(&arena);
+        absl::Status parse_status = json::JsonStringToMessage(payload, msg);
+        ABSL_CHECK(!parse_status.ok());
+      }
+    }
+  }
+}
+BENCHMARK(BM_ParseJsonUnknown);
+
 }  // namespace
 }  // namespace protobuf
 }  // namespace google
