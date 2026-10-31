@@ -7,6 +7,8 @@
 
 "Validate that the protoc binary is authentic and not spoofed by a malicious actor."
 
+load("@rules_shell//shell:run_shell.bzl", "run_shell")
+load("@rules_shell//shell/toolchains:sh_exec_toolchain.bzl", "SH_EXEC_TOOLCHAIN_TYPE")
 load("//bazel/common:proto_common.bzl", "proto_common")
 load("//bazel/private:toolchain_helpers.bzl", "toolchains")
 load(":tool_integrity.bzl", "RELEASE_VERSION")
@@ -16,37 +18,40 @@ def _protoc_authenticity_impl(ctx):
     # Therefore there's no validation to perform.
     if not proto_common.INCOMPATIBLE_ENABLE_PROTO_TOOLCHAIN_RESOLUTION:
         return [OutputGroupInfo(_validation = depset())]
-    toolchain = ctx.toolchains[toolchains.PROTO_TOOLCHAIN]
+    toolchain = ctx.exec_groups["validation"].toolchains[toolchains.PROTO_TOOLCHAIN]
     if not toolchain:
         fail("Protocol compiler toolchain could not be resolved.")
     proto_lang_toolchain_info = toolchain.proto
     validation_output = ctx.actions.declare_file("validation_output.txt")
 
-    ctx.actions.run_shell(
+    run_shell(
+        ctx,
+        arguments = [proto_lang_toolchain_info.proto_compiler.executable.path, validation_output.path],
+        exec_group = "validation",
         mnemonic = "ProtocAuthenticityCheck",
         outputs = [validation_output],
         tools = [proto_lang_toolchain_info.proto_compiler],
-        toolchain = toolchains.PROTO_TOOLCHAIN,
         command = """\
-        {protoc} --version > {validation_output}
-        IFS= read -r version_line < {validation_output}
-        [[ $version_line == *-dev ]] && {{
+        "$1" --version > "$2"
+        IFS= read -r version_line < "$2"
+        case "$version_line" in
+        *-dev)
           echo 'WARNING: Detected a development version of protoc.
           Development versions are not validated for authenticity.
           To ensure a secure build, please use a released version of protoc.'
           exit 0
-        }}
-        [[ $version_line == "libprotoc {RELEASE_VERSION}"* ]] || {{
+          ;;
+        "libprotoc {RELEASE_VERSION}"*) ;;
+        *) {{
           echo '{severity}: protoc version does not match protobuf Bazel module; we do not support this.
           It is considered undefined behavior that is expected to break in the future even if it appears to work today.'
           echo '{suppression_note}'
           echo 'Expected: libprotoc {RELEASE_VERSION}'
           echo "Actual: $version_line"
           exit {mismatch_exit_code}
-        }} >&2
+        }} >&2 ;;
+        esac
         """.format(
-            protoc = proto_lang_toolchain_info.proto_compiler.executable.path,
-            validation_output = validation_output.path,
             RELEASE_VERSION = RELEASE_VERSION.removeprefix("v"),
             suppression_note = (
                 "To suppress this error, run Bazel with --@com_google_protobuf//bazel/toolchains:allow_nonstandard_protoc" if ctx.attr.fail_on_mismatch else ""
@@ -73,5 +78,7 @@ protoc_authenticity = rule(
             default = "//src/google/protobuf/compiler:protoc_minimal",
         ),
     }),
-    toolchains = toolchains.use_toolchain(toolchains.PROTO_TOOLCHAIN),
+    exec_groups = {
+        "validation": exec_group(toolchains = [SH_EXEC_TOOLCHAIN_TYPE] + toolchains.use_toolchain(toolchains.PROTO_TOOLCHAIN)),
+    } if proto_common.INCOMPATIBLE_ENABLE_PROTO_TOOLCHAIN_RESOLUTION else {},
 )
