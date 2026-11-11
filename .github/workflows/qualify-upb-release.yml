@@ -1,0 +1,26 @@
+name: Check the release upb generators without Bash
+on:
+  push:
+    branches: [qualification/37x-upb-direct]
+permissions:
+  contents: read
+jobs:
+  generators:
+    if: github.repository == 'tamird/protobuf'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    env:
+      USE_BAZEL_VERSION: 8.7.0
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+      - run: python3 .github/scripts/qualify_upb_release.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: upb-release-generators
+          path: ${{ runner.temp }}/upb-37x/
