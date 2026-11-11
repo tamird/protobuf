@@ -8,6 +8,11 @@ import subprocess
 
 
 ROOT = Path(os.environ["RUNNER_TEMP"]) / "upb-37x"
+TOOL_ENV = {
+    name: os.environ[name]
+    for name in ("HOME", "PATH", "USER", "LOGNAME", "LANG", "CC", "CXX", "USE_BAZEL_VERSION")
+    if name in os.environ
+}
 TARGETS = [
     f"//{package}:gen_{message}_upb_proto_{plugin}_stage1"
     for package, message in [("upb/reflection", "descriptor"), ("upb_generator", "plugin")]
@@ -16,7 +21,7 @@ TARGETS = [
 
 
 def output(*args):
-    return subprocess.check_output(args, text=True).strip()
+    return subprocess.check_output(args, env=TOOL_ENV, text=True).strip()
 
 
 def digests(paths):
@@ -25,11 +30,23 @@ def digests(paths):
 
 def build(arm, phase, *extra):
     diagnostics = ROOT / f"{arm}-{phase}.log"
+    command = [
+        "bazel", "--batch", "build", "--jobs=4", "--keep_going",
+        "--spawn_strategy=processwrapper-sandbox", "--remote_cache=", "--disk_cache=",
+        *extra, *TARGETS,
+    ]
+    if phase == "without-bash":
+        # Start the Bazel server in a private mount namespace. The worker's
+        # ordinary Bash stays available to Actions and the stock comparison.
+        command = [
+            "sudo", "unshare", "--mount", "--propagation", "private", "--", "/bin/sh", "-ec",
+            'mount --bind "$1" /usr/bin/bash; shift; test ! -x /bin/bash; exec "$@"',
+            "mask-bash", str(ROOT / "unavailable-bash"),
+            "setpriv", f"--reuid={os.getuid()}", f"--regid={os.getgid()}", "--init-groups",
+            "env", "-i", *(f"{k}={v}" for k, v in TOOL_ENV.items()), *command,
+        ]
     with diagnostics.open("w") as log:
-        code = subprocess.run([
-            "bazel", "build", "--jobs=4", "--keep_going", "--spawn_strategy=linux-sandbox",
-            "--remote_cache=", "--disk_cache=", *extra, *TARGETS,
-        ], stdout=log, stderr=subprocess.STDOUT).returncode
+        code = subprocess.run(command, env=TOOL_ENV, stdout=log, stderr=subprocess.STDOUT).returncode
     if code:
         print("\n".join(diagnostics.read_text().splitlines()[-35:]), flush=True)
     return code
@@ -42,8 +59,8 @@ def check(arm, revision, mnemonic):
         raise RuntimeError((arm, actual, revision))
     if build(arm, "normal"):
         raise RuntimeError(f"{arm} could not build the four generators with Bash available")
-    execroot = Path(output("bazel", "info", "execution_root"))
-    files = output("bazel", "cquery", "set(" + " ".join(TARGETS) + ")", "--output=files")
+    execroot = Path(output("bazel", "--batch", "info", "execution_root"))
+    files = output("bazel", "--batch", "cquery", "set(" + " ".join(TARGETS) + ")", "--output=files")
     paths = {}
     for name in files.splitlines():
         if not name.startswith("bazel-out/") or "/stage1/" not in name:
@@ -59,7 +76,7 @@ def check(arm, revision, mnemonic):
     for path in paths.values():
         path.unlink()
     bep = ROOT / f"{arm}-without-bash.bep"
-    code = build(arm, "without-bash", "--sandbox_block_path=/usr/bin/bash",
+    code = build(arm, "without-bash",
                  "--build_event_publish_all_actions", f"--build_event_json_file={bep}")
     owners = {}
     for line in bep.read_text().splitlines():
@@ -84,6 +101,7 @@ def check(arm, revision, mnemonic):
 
 if __name__ == "__main__":
     ROOT.mkdir()
+    (ROOT / "unavailable-bash").touch(mode=0o644)
     if Path("/bin/bash").resolve() != Path("/usr/bin/bash").resolve():
         raise RuntimeError("Blocking /usr/bin/bash would leave /bin/bash available")
     parent = check("release", "0cf7641d26918523b3c26ae8f9b197cbbda05baf", "Genrule")

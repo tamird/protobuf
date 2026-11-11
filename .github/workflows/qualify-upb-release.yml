@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 8
           persist-credentials: false
       - run: python3 .github/scripts/qualify_upb_release.py
       - uses: actions/upload-artifact@v4
